@@ -7,5 +7,5 @@ const (
 
 const (
 	StoragePath = "./uploads"
+	BackupPath  = "backup/%s.json"
 )
-

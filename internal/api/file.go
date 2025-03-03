@@ -13,14 +13,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (nc *NodeController) FileUploadsHandler(c *gin.Context) {
+func (nc *NodeController) FileUploadsHandler(c *gin.Context, nodeId string) {
 	file, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to upload file"})
 		return
 	}
-
-	uploadDir := "./uploads"
+	uploadDir := fmt.Sprintf("./uploads/%s", nodeId)
 	filePath := fmt.Sprintf("%s/%s", uploadDir, file.Filename)
 	if err := c.SaveUploadedFile(file, filePath); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})

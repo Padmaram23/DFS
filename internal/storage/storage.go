@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
@@ -53,4 +54,28 @@ func GetFileSize(path string) (int64, error) {
 		return 0, err
 	}
 	return fileInfo.Size(), nil
+}
+
+func (fs *FileStore) SaveToFile(filePath string) error {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	data, err := json.Marshal(fs.files)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(filePath, data, 0644)
+}
+
+func (fs *FileStore) LoadFromFile(filePath string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	return json.Unmarshal(data, &fs.files)
 }

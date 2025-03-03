@@ -15,6 +15,7 @@ import (
 
 	"obscure-fs-rebuild/internal/hashing"
 	"obscure-fs-rebuild/internal/storage"
+	internalUtils "obscure-fs-rebuild/internal/utils"
 	"obscure-fs-rebuild/utils"
 
 	"github.com/ipfs/go-cid"
@@ -327,6 +328,13 @@ func streamHandler(fileStore *storage.FileStore) network.StreamHandler {
 
 func (n *Network) Shutdown() error {
 	log.Println("Shutting down host...")
+	log.Println("Saving file store before shutting down...")
+
+	filepath := fmt.Sprintf(internalUtils.BackupPath, n.GetHost().ID().String())
+	if err := n.fileStore.SaveToFile(filepath); err != nil {
+		log.Println("Error saving file store: %v", err)
+		return err
+	}
 	return n.GetHost().Close()
 }
 
@@ -347,4 +355,13 @@ func LoadPrivateKey(path string) (crypto.PrivKey, error) {
 	}
 
 	return pkey, nil
+}
+
+func (n *Network) LodeBackupFileStore() {
+	err := n.fileStore.LoadFromFile(fmt.Sprintf(internalUtils.BackupPath, n.GetHost().ID().String()))
+	if err != nil {
+		log.Println("No existing file store found, starting fresh.")
+	} else {
+		log.Println("Loading existing file store...")
+	}
 }

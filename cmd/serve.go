@@ -24,7 +24,7 @@ var serveCmd = &cobra.Command{
 		if store == nil {
 			log.Println("Initializing file store...")
 			store = storage.NewFileStore()
-			log.Println("Sucessfully initialzied file store...")
+			log.Println("Successfully initialized file store...")
 		}
 
 		if network == nil {
@@ -33,6 +33,7 @@ var serveCmd = &cobra.Command{
 				log.Fatalf("Invalid port: %d\n", listenPort)
 			}
 			network = networking.NewNetwork(ctx, listenPort, pkey, bootstrapNodes, store)
+			network.LodeBackupFileStore()
 			network.StartSimpleProtocol(utils.ProtocolID)
 			log.Printf("Node ID: %s\n", network.GetHost().ID().String())
 			network.ConnectToBootstrapNodes()
@@ -61,7 +62,9 @@ var serveCmd = &cobra.Command{
 
 		files := router.Group("/files")
 		files.GET("/", nodeController.GetFilesHandler)
-		files.POST("/upload", nodeController.FileUploadsHandler)
+		files.POST("/upload", func(c *gin.Context) {
+			nodeController.FileUploadsHandler(c, network.GetHost().ID().String())
+		})
 		files.GET("/:cid", nodeController.GetFileHandler)
 
 		go func() {
