@@ -357,6 +357,16 @@ func LoadPrivateKey(path string) (crypto.PrivKey, error) {
 	return pkey, nil
 }
 
+func (n *Network) ReAnnounceFiles() {
+	cid := n.fileStore.GetFileCid()
+	for _, id := range cid {
+		fmt.Printf("Re-announcing file: %s\n", id)
+		if err := n.AnnounceFile(id); err != nil {
+			fmt.Printf("Error announcing file %s: %v\n", id, err)
+		}
+	}
+}
+
 func (n *Network) LodeBackupFileStore() {
 	err := n.fileStore.LoadFromFile(fmt.Sprintf(internalUtils.BackupPath, n.GetHost().ID().String()))
 	if err != nil {

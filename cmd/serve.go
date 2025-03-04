@@ -38,6 +38,7 @@ var serveCmd = &cobra.Command{
 			log.Printf("Node ID: %s\n", network.GetHost().ID().String())
 			network.ConnectToBootstrapNodes()
 			network.AnnounceToPeers(network.GetHost().ID().String(), fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", listenPort))
+			network.ReAnnounceFiles()
 		}
 
 		if registry == nil {

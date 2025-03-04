@@ -79,3 +79,16 @@ func (fs *FileStore) LoadFromFile(filePath string) error {
 
 	return json.Unmarshal(data, &fs.files)
 }
+
+func (fs *FileStore) GetFileCid() []string {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	announcedIDs := make([]string, 0, len(fs.files))
+
+	for id := range fs.files {
+		announcedIDs = append(announcedIDs, id)
+	}
+
+	return announcedIDs
+}
