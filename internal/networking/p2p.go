@@ -1,19 +1,23 @@
 package networking
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
-	"obscure-fs-rebuild/internal/hashing"
+	"obscure-fs-rebuild/internal/codec"
 	"obscure-fs-rebuild/internal/storage"
 	internalUtils "obscure-fs-rebuild/internal/utils"
 	"obscure-fs-rebuild/utils"
@@ -113,8 +117,7 @@ func (n *Network) FindFile(id string) ([]peer.AddrInfo, error) {
 	return peers, nil
 }
 
-func (n *Network) ShareFile(path string) (cid string, err error) {
-	cid, err = hashing.HashFile(path)
+func (n *Network) ShareFile(cid string, path string) (err error) {
 	if err != nil {
 		return
 	}
@@ -130,13 +133,35 @@ func (n *Network) ShareFile(path string) (cid string, err error) {
 	}
 
 	log.Printf("File shared with CID: %s\n", cid)
-	return cid, nil
+	return nil
+}
+
+func (n *Network) ShareMetaData(meta *storage.Metadata) (err error) {
+
+	err = n.fileStore.StoreMetadata(meta)
+	if err != nil {
+		return
+	}
+
+	// err = n.AnnounceFile(meta.Checksum)
+	// if err != nil {
+	// 	return
+	// }
+
+	// log.Printf("File shared with CID: %s\n", meta.Checksum)
+	// return err
+	return
 }
 
 func (n *Network) RetrieveFile(cid, outputPath string) error {
-	path, err := n.fileStore.GetFile(cid)
+	meta, err := n.fileStore.GetMetaData(cid)
 	if err == nil {
-		return utils.CopyFile(path, outputPath)
+		ec := codec.ErasureCodec{}
+		outfile, err := ec.Decode(meta)
+		if err != nil {
+			panic(err)
+		}
+		return utils.CopyFile(outfile, outputPath)
 	}
 
 	log.Printf("file not found locally! searching on the n/w for file: %s", cid)
@@ -253,7 +278,7 @@ func (n *Network) AnnounceToPeers(nodeID, address string) {
 }
 
 func (n *Network) StartSimpleProtocol(protocolID protocol.ID) {
-	n.host.SetStreamHandler(protocolID, streamHandler(n.fileStore))
+	n.host.SetStreamHandler(protocolID, streamHandler(n, n.fileStore))
 }
 
 func (n *Network) SendMessage(peerID peer.ID, protocolID protocol.ID, msg string) (err error) {
@@ -272,7 +297,7 @@ func (n *Network) SendMessage(peerID peer.ID, protocolID protocol.ID, msg string
 	return nil
 }
 
-func streamHandler(fileStore *storage.FileStore) network.StreamHandler {
+func streamHandler(net *Network, fileStore *storage.FileStore) network.StreamHandler {
 	return func(stream network.Stream) {
 		log.Println("new stream opened")
 		defer stream.Close()
@@ -284,7 +309,7 @@ func streamHandler(fileStore *storage.FileStore) network.StreamHandler {
 			return
 		}
 
-		command := string(buf[:n])
+		command := strings.TrimSpace(string(buf[:n]))
 		log.Printf("received command: %s\n", command)
 
 		switch command {
@@ -302,15 +327,64 @@ func streamHandler(fileStore *storage.FileStore) network.StreamHandler {
 				log.Println("file list sent successfully")
 			}
 
+		case "send_file":
+			// Receiving file logic
+			reader := bufio.NewReader(stream)
+
+			// Read JSON metadata from stream
+			jsonData, err := reader.ReadBytes('\n') // Assumes sender adds a newline at the end
+			if err != nil {
+				log.Printf("error reading file metadata from stream: %s\n", err)
+				return
+			}
+
+			var data map[string]string
+			if err := json.Unmarshal(jsonData, &data); err != nil {
+				log.Printf("error unmarshaling file metadata: %s\n", err)
+				return
+			}
+
+			// Decode Base64 file data
+			fileData, err := base64.StdEncoding.DecodeString(data["value"])
+			if err != nil {
+				log.Printf("error decoding base64 file data: %s\n", err)
+				return
+			}
+
+			// Save the file
+			uploadDir := fmt.Sprintf("./uploads/%s", net.GetHost().ID().String())
+
+			// Ensure the directory exists
+			if err := os.MkdirAll(uploadDir, os.ModePerm); err != nil {
+				log.Printf("error creating directory: %s\n", err)
+				return
+			}
+
+			filePath := fmt.Sprintf("%s/%s", uploadDir, data["key"])
+
+			// Write the file after ensuring the directory exists
+			if err := os.WriteFile(filePath, fileData, 0644); err != nil {
+				log.Printf("error writing received file: %s\n", err)
+				return
+			}
+
+			err = net.ShareFile(data["key"], filePath)
+			log.Printf("File received and saved as %s\n", data["key"])
+
 		default:
 			cid := command
-			path, err := fileStore.GetFile(cid)
+			meta, err := fileStore.GetMetaData(cid)
 			if err != nil {
 				log.Printf("file not found for CID: %s\n", cid)
 				return
 			}
 
-			fileData, err := os.ReadFile(path)
+			ec := codec.ErasureCodec{}
+			outfile, err := ec.Decode(meta)
+			if err != nil {
+				panic(err)
+			}
+			fileData, err := os.ReadFile(outfile)
 			if err != nil {
 				log.Printf("failed to read file: %s\n", err)
 				return
@@ -374,4 +448,86 @@ func (n *Network) LodeBackupFileStore() {
 	} else {
 		log.Println("Loading existing file store...")
 	}
+}
+
+func (n *Network) SendFileInStream(s network.Stream, fileId string, fileData []byte) error {
+	writer := bufio.NewWriter(s)
+
+	// Step 1: Send "send_file" command first
+	_, err := writer.WriteString("send_file\n") // Ensure newline for proper reading
+	if err != nil {
+		return err
+	}
+	err = writer.Flush() // Flush to ensure the command is sent separately
+	if err != nil {
+		return err
+	}
+
+	// Step 2: Create a key-value map for file metadata
+	data := map[string]string{
+		"key":   fileId,
+		"value": base64.StdEncoding.EncodeToString(fileData),
+	}
+
+	// Step 3: Serialize to JSON
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	// Step 4: Send JSON file metadata
+	_, err = writer.Write(jsonData)
+	if err != nil {
+		return err
+	}
+
+	// Step 5: Append a newline to mark the end of JSON data
+	_, err = writer.WriteString("\n")
+	if err != nil {
+		return err
+	}
+
+	// Step 6: Flush the writer to ensure all data is sent
+	return writer.Flush()
+}
+
+func getRandomNumber(length int) int {
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	return r.Intn(length)
+}
+
+func (n *Network) getPeersWithoutSelf() []peer.ID {
+	var filteredPeers []peer.ID
+	selfID := n.GetHost().ID()
+
+	for _, p := range n.host.Peerstore().Peers() {
+		if p != selfID {
+			filteredPeers = append(filteredPeers, p)
+		}
+	}
+
+	return filteredPeers
+}
+
+func (n *Network) ShareFileToPeers(data map[string][]byte) {
+	peers := n.getPeersWithoutSelf()
+
+	for fileId, file := range data {
+		// FIXME: change a better strategy to choose a peer to save
+		ranNum := getRandomNumber(len(peers))
+		peerID := peers[ranNum%len(peers)]
+		stream, err := n.host.NewStream(n.ctx, peerID, utils.ProtocolID)
+		if err != nil {
+			log.Printf("Failed to open stream to peer %s: %v\n", peerID, err)
+			continue
+		}
+
+		err = n.SendFileInStream(stream, fileId, file)
+		if err != nil {
+			log.Printf("Failed to send %s: %v\n", file, err)
+		}
+		stream.Close()
+
+	}
+	return
 }

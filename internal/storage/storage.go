@@ -8,14 +8,16 @@ import (
 )
 
 type FileStore struct {
-	files map[string]string
-	mu    sync.RWMutex
+	files    map[string]string
+	mu       sync.RWMutex
+	metadata map[string]*Metadata
 }
 
 func NewFileStore() *FileStore {
 	return &FileStore{
-		files: make(map[string]string),
-		mu:    sync.RWMutex{},
+		files:    make(map[string]string),
+		mu:       sync.RWMutex{},
+		metadata: make(map[string]*Metadata),
 	}
 }
 
@@ -23,6 +25,13 @@ func (fs *FileStore) StoreFile(cid string, path string) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	fs.files[cid] = path
+	return nil
+}
+
+func (fs *FileStore) StoreMetadata(meta *Metadata) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	fs.metadata[meta.Checksum] = meta
 	return nil
 }
 
@@ -37,6 +46,18 @@ func (fs *FileStore) GetFile(cid string) (string, error) {
 	return path, nil
 }
 
+func (fs *FileStore) GetMetaData(cid string) (*Metadata, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	meta, exists := fs.metadata[cid]
+	if !exists {
+		return nil, fmt.Errorf("file not found for CID: %s", cid)
+	}
+
+	return meta, nil
+}
+
 func (fs *FileStore) ListFiles() map[string]string {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
@@ -44,6 +65,17 @@ func (fs *FileStore) ListFiles() map[string]string {
 	copy := make(map[string]string, len(fs.files))
 	for k, v := range fs.files {
 		copy[k] = v
+	}
+	return copy
+}
+
+func (fs *FileStore) ListMetaData() map[string]Metadata {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	// Return a copy of the map to prevent modification by callers.
+	copy := make(map[string]Metadata, len(fs.metadata))
+	for k, v := range fs.metadata {
+		copy[k] = *v
 	}
 	return copy
 }
@@ -60,7 +92,11 @@ func (fs *FileStore) SaveToFile(filePath string) error {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
-	data, err := json.Marshal(fs.files)
+	fsData := map[string]interface{}{
+		"files":    fs.files,
+		"metaData": fs.metadata,
+	}
+	data, err := json.Marshal(fsData)
 	if err != nil {
 		return err
 	}
@@ -77,7 +113,22 @@ func (fs *FileStore) LoadFromFile(filePath string) error {
 		return err
 	}
 
-	return json.Unmarshal(data, &fs.files)
+	// Temporary structure to hold JSON data
+	var fsData struct {
+		Files    map[string]string
+		MetaData map[string]*Metadata
+	}
+
+	// Unmarshal JSON into temporary struct
+	if err := json.Unmarshal(data, &fsData); err != nil {
+		return err
+	}
+
+	// Assign values back to FileStore
+	fs.files = fsData.Files
+	fs.metadata = fsData.MetaData
+
+	return nil
 }
 
 func (fs *FileStore) GetFileCid() []string {

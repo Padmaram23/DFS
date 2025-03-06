@@ -1,11 +1,13 @@
 package codec
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 
+	"obscure-fs-rebuild/internal/hashing"
 	"obscure-fs-rebuild/internal/storage"
 	"obscure-fs-rebuild/internal/utils"
 
@@ -19,16 +21,16 @@ type Codec interface {
 
 type ErasureCodec struct{}
 
-func (ErasureCodec) Encode(metadata *storage.Metadata, src []byte) (err error) {
+func (ErasureCodec) Encode(metadata *storage.Metadata, src []byte) (shardsData map[string][]byte, err error) {
 	log.Println("beginning encoding with default configs..")
 	log.Printf("shard size : %v\n", utils.Shards)
-	log.Printf("pairty size: %v\n", utils.Pairty)
+	log.Printf("parity size: %v\n", utils.Parity)
 
-	if utils.Shards+utils.Pairty > 256 {
-		return errors.New("sum of shard & pairty cannot be > 256")
+	if utils.Shards+utils.Parity > 256 {
+		return nil, errors.New("sum of shard & parity cannot be > 256")
 	}
 
-	enc, err := reedsolomon.New(utils.Shards, utils.Pairty)
+	enc, err := reedsolomon.New(utils.Shards, utils.Parity)
 	if err != nil {
 		return
 	}
@@ -43,36 +45,38 @@ func (ErasureCodec) Encode(metadata *storage.Metadata, src []byte) (err error) {
 		return
 	}
 
-	basePath := fmt.Sprintf("%s/%s", utils.StoragePath, metadata.Checksum)
-	err = os.MkdirAll(basePath, 0755)
-	if err != nil && !errors.Is(err, os.ErrExist) {
-		return
-	}
+	// basePath := fmt.Sprintf("%s/%s", utils.StoragePath, metadata.Checksum)
+	// err = os.MkdirAll(basePath, 0755)
+	// if err != nil && !errors.Is(err, os.ErrExist) {
+	// 	return
+	// }
 
 	metadata.Parts = make([]string, len(shards))
+	shardsData = make(map[string][]byte)
 	for i, shard := range shards {
-		shardFileName := fmt.Sprintf("%s/%s.%d", basePath, metadata.Checksum, i)
+		shardFileName, _ := hashing.HashData(bytes.NewReader(shard))
 
 		// updating metadata
 		metadata.Parts[i] = shardFileName
+		shardsData[shardFileName] = shard
 
-		_, err = os.Stat(shardFileName)
-		if err == nil {
-			log.Printf("chunk exists skipping: %s.%d\n", metadata.Checksum, i)
-			continue
-		}
+		// _, err = os.Stat(shardFileName)
+		// if err == nil {
+		// 	log.Printf("chunk exists skipping: %s.%d\n", metadata.Checksum, i)
+		// 	continue
+		// }
 
-		log.Printf("saving chunk: %s.%d\n", metadata.Checksum, i)
+		// log.Printf("saving chunk: %s.%d\n", metadata.Checksum, i)
 
-		err = os.WriteFile(shardFileName, shard, 0644)
-		if err != nil {
-			return
-		}
+		// err = os.WriteFile(shardFileName, shard, 0644)
+		// if err != nil {
+		// 	return shardsData, nil
+		// }
 	}
 
 	// updating metadata
 	metadata.Shards = utils.Shards
-	metadata.Pairty = utils.Pairty
+	metadata.Parity = utils.Parity
 
 	return
 }
@@ -80,9 +84,9 @@ func (ErasureCodec) Encode(metadata *storage.Metadata, src []byte) (err error) {
 func (ErasureCodec) Decode(metadata *storage.Metadata) (outfile string, err error) {
 	log.Println("beginning decoding with default configs..")
 	log.Printf("shard size : %v\n", metadata.Shards)
-	log.Printf("pairty size: %v\n", metadata.Pairty)
+	log.Printf("parity size: %v\n", metadata.Parity)
 
-	enc, _ := reedsolomon.New(metadata.Shards, metadata.Pairty)
+	enc, _ := reedsolomon.New(metadata.Shards, metadata.Parity)
 
 	shards := make([][]byte, metadata.GetShardSum())
 	for i, part := range metadata.Parts {
@@ -125,7 +129,7 @@ func (ErasureCodec) Decode(metadata *storage.Metadata) (outfile string, err erro
 		return
 	}
 
-	log.Printf("file decoded & saved sucessfully : %s\n", outfile)
+	log.Printf("file decoded & saved successfully : %s\n", outfile)
 
 	return outfile, nil
 }

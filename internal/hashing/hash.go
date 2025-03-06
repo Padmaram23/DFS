@@ -34,3 +34,22 @@ func HashFile(path string) (string, error) {
 
 	return c.String(), nil
 }
+
+func HashData(data io.Reader) (string, error) {
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, data); err != nil {
+		return "", err
+	}
+	hash := hasher.Sum(nil)
+
+	// Create multihash
+	mh, err := multihash.Encode(hash, multihash.SHA2_256)
+	if err != nil {
+		return "", err
+	}
+
+	// Create CID
+	c := cid.NewCidV1(cid.Raw, mh)
+
+	return c.String(), nil
+}

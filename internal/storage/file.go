@@ -10,13 +10,13 @@ type StoreMetadata struct {
 type Metadata struct {
 	Name     string
 	Shards   int
-	Pairty   int
+	Parity   int
 	Checksum string
 	Parts    []string
 }
 
 func (m Metadata) GetShardSum() int {
-	return m.Pairty + m.Shards
+	return m.Parity + m.Shards
 }
 
 func ReadFile(path string) ([]byte, error) {

@@ -2,7 +2,7 @@ package utils
 
 const (
 	Shards = 8
-	Pairty = 2
+	Parity = 2
 )
 
 const (

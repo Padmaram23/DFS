@@ -25,7 +25,7 @@ func TestCodec(t *testing.T) {
 	}
 
 	ec := codec.ErasureCodec{}
-	err := ec.Encode(metadata, buf)
+	_, err := ec.Encode(metadata, buf)
 	if err != nil {
 		panic(err)
 	}
@@ -41,7 +41,7 @@ func TestCodec(t *testing.T) {
 	}
 
 	assert.Equal(t, utils.Shards, metadata.Shards)
-	assert.Equal(t, utils.Pairty, metadata.Pairty)
+	assert.Equal(t, utils.Parity, metadata.Parity)
 	assert.Equal(t, metadata.Checksum, hash)
 
 	os.RemoveAll(filepath.Dir(outfile))

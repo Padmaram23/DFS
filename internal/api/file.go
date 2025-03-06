@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +9,9 @@ import (
 	"net/http"
 	"os"
 
+	"obscure-fs-rebuild/internal/codec"
+	"obscure-fs-rebuild/internal/hashing"
+	"obscure-fs-rebuild/internal/storage"
 	"obscure-fs-rebuild/utils"
 
 	"github.com/gin-gonic/gin"
@@ -19,20 +23,45 @@ func (nc *NodeController) FileUploadsHandler(c *gin.Context, nodeId string) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to upload file"})
 		return
 	}
-	uploadDir := fmt.Sprintf("./uploads/%s", nodeId)
-	filePath := fmt.Sprintf("%s/%s", uploadDir, file.Filename)
-	if err := c.SaveUploadedFile(file, filePath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
-		return
-	}
+	// uploadDir := fmt.Sprintf("./uploads/%s", nodeId)
+	// filePath := fmt.Sprintf("%s/%s", uploadDir, file.Filename)
+	// if err := c.SaveUploadedFile(file, filePath); err != nil {
+	// 	c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+	// 	return
+	// }
 
-	cid, err := nc.network.ShareFile(filePath)
+	// cid, err := nc.network.ShareFile(filePath)
+	// buf, _ := storage.ReadFile(filePath)
+
+	// read the file without saving
+	fileData, err := file.Open()
 	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to open file"})
 		return
 	}
+	defer fileData.Close()
 
-	log.Printf("file uploaded: %s (CID: %s)\n", filePath, cid)
-	c.JSON(http.StatusOK, gin.H{"message": "File uploaded successfully", "cid": cid})
+	buf, _ := io.ReadAll(fileData)
+	hash, _ := hashing.HashData(bytes.NewReader(buf))
+	// hash, _ := hashing.HashFile(filePath)
+	metadata := &storage.Metadata{
+		Name:     file.Filename,
+		Checksum: hash,
+	}
+	ec := codec.ErasureCodec{}
+	data, err := ec.Encode(metadata, buf)
+	if err != nil {
+		panic(err)
+	}
+	// err = nc.network.ShareFile(metadata)
+	nc.network.ShareFileToPeers(data)
+	if err != nil {
+		log.Printf("error: %s \n", err)
+	}
+
+	log.Printf("file uploaded:CID: %s\n", hash)
+	nc.network.ShareMetaData(metadata)
+	c.JSON(http.StatusOK, gin.H{"message": "File uploaded successfully", "cid": hash})
 }
 
 func (nc *NodeController) GetFileHandler(c *gin.Context) {
@@ -52,6 +81,7 @@ func (nc *NodeController) GetFileHandler(c *gin.Context) {
 		return
 	}
 
+	log.Printf("tempFilePath: %s /n", tempFilePath)
 	c.File(tempFilePath)
 }
 
