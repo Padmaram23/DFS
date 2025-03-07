@@ -155,50 +155,91 @@ func (n *Network) ShareMetaData(meta *storage.Metadata) (err error) {
 
 func (n *Network) RetrieveFile(cid, outputPath string) error {
 	meta, err := n.fileStore.GetMetaData(cid)
+	if err != nil {
+		log.Printf("meta data not found for ci: %s", cid)
+		return fmt.Errorf("meta data not found for ci: %s", cid)
+	}
+	var Shards [][]byte
+	for _, part := range meta.Parts {
+		providers, err := n.FindFile(part)
+		if err != nil || len(providers) == 0 {
+			return fmt.Errorf("no providers found for CID: %s", cid)
+		}
+
+		fmt.Printf("providers: %v\n", providers)
+
+		for _, provider := range providers {
+			stream, err := n.host.NewStream(n.ctx, provider.ID, utils.ProtocolID)
+			if err != nil {
+				log.Printf("failed to open stream with provider: %s, error: %v\n", provider.ID.String(), err)
+				continue
+			}
+			defer stream.Close()
+			_, err = stream.Write([]byte(part))
+			if err != nil {
+				log.Printf("failed to send CID to provider: %s, error: %v\n", provider.ID.String(), err)
+				continue
+			}
+
+			fileData, err := io.ReadAll(stream)
+			if err != nil {
+				log.Printf("Failed to read file data from provider: %s, error: %v\n", provider.ID.String(), err)
+				continue
+			}
+			Shards = append(Shards, fileData)
+			// err = os.WriteFile(outputPath, fileData, 0644)
+			// if err != nil {
+			// 	return fmt.Errorf("failed to save file to path: %s, error: %w", outputPath, err)
+			// }
+		}
+	}
+	if len(Shards) == 0 {
+		return fmt.Errorf("failed to retrieve any valid shards for CID: %s", cid)
+	}
 	if err == nil {
 		ec := codec.ErasureCodec{}
-		outfile, err := ec.Decode(meta)
+		outfile, err := ec.Decode(meta, Shards)
 		if err != nil {
 			panic(err)
 		}
 		return utils.CopyFile(outfile, outputPath)
 	}
 
-	log.Printf("file not found locally! searching on the n/w for file: %s", cid)
-	providers, err := n.FindFile(cid)
-	if err != nil || len(providers) == 0 {
-		return fmt.Errorf("no providers found for CID: %s", cid)
-	}
+	// log.Printf("file not found locally! searching on the n/w for file: %s", cid)
+	// providers, err := n.FindFile(cid)
+	// if err != nil || len(providers) == 0 {
+	// 	return fmt.Errorf("no providers found for CID: %s", cid)
+	// }
 
-	fmt.Printf("providers: %v\n", providers)
+	// fmt.Printf("providers: %v\n", providers)
 
-	for _, provider := range providers {
-		stream, err := n.host.NewStream(n.ctx, provider.ID, utils.ProtocolID)
-		if err != nil {
-			log.Printf("failed to open stream with provider: %s, error: %v\n", provider.ID.String(), err)
-			continue
-		}
-		defer stream.Close()
+	// for _, provider := range providers {
+	// 	stream, err := n.host.NewStream(n.ctx, provider.ID, utils.ProtocolID)
+	// 	if err != nil {
+	// 		log.Printf("failed to open stream with provider: %s, error: %v\n", provider.ID.String(), err)
+	// 		continue
+	// 	}
+	// 	defer stream.Close()
 
-		_, err = stream.Write([]byte(cid))
-		if err != nil {
-			log.Printf("failed to send CID to provider: %s, error: %v\n", provider.ID.String(), err)
-			continue
-		}
+	// 	_, err = stream.Write([]byte(cid))
+	// 	if err != nil {
+	// 		log.Printf("failed to send CID to provider: %s, error: %v\n", provider.ID.String(), err)
+	// 		continue
+	// 	}
 
-		fileData, err := io.ReadAll(stream)
-		if err != nil {
-			log.Printf("Failed to read file data from provider: %s, error: %v\n", provider.ID.String(), err)
-			continue
-		}
+	// 	fileData, err := io.ReadAll(stream)
+	// 	if err != nil {
+	// 		log.Printf("Failed to read file data from provider: %s, error: %v\n", provider.ID.String(), err)
+	// 		continue
+	// 	}
 
-		err = os.WriteFile(outputPath, fileData, 0644)
-		if err != nil {
-			return fmt.Errorf("failed to save file to path: %s, error: %w", outputPath, err)
-		}
+	// 	err = os.WriteFile(outputPath, fileData, 0644)
+	// 	if err != nil {
+	// 		return fmt.Errorf("failed to save file to path: %s, error: %w", outputPath, err)
+	// 	}
 
-		log.Printf("file retrieved successfully and saved at: %s\n", outputPath)
-	}
+	// 	log.Printf("file retrieved successfully and saved at: %s\n", outputPath)
+	// }
 
 	return nil
 }
@@ -373,18 +414,18 @@ func streamHandler(net *Network, fileStore *storage.FileStore) network.StreamHan
 
 		default:
 			cid := command
-			meta, err := fileStore.GetMetaData(cid)
+			filePath, err := fileStore.GetFile(cid)
 			if err != nil {
 				log.Printf("file not found for CID: %s\n", cid)
 				return
 			}
 
-			ec := codec.ErasureCodec{}
-			outfile, err := ec.Decode(meta)
-			if err != nil {
-				panic(err)
-			}
-			fileData, err := os.ReadFile(outfile)
+			// ec := codec.ErasureCodec{}
+			// outfile, err := ec.Decode(meta)
+			// if err != nil {
+			// 	panic(err)
+			// }
+			fileData, err := os.ReadFile(filePath)
 			if err != nil {
 				log.Printf("failed to read file: %s\n", err)
 				return

@@ -81,22 +81,22 @@ func (ErasureCodec) Encode(metadata *storage.Metadata, src []byte) (shardsData m
 	return
 }
 
-func (ErasureCodec) Decode(metadata *storage.Metadata) (outfile string, err error) {
+func (ErasureCodec) Decode(metadata *storage.Metadata, shards [][]byte) (outfile string, err error) {
 	log.Println("beginning decoding with default configs..")
 	log.Printf("shard size : %v\n", metadata.Shards)
 	log.Printf("parity size: %v\n", metadata.Parity)
 
 	enc, _ := reedsolomon.New(metadata.Shards, metadata.Parity)
 
-	shards := make([][]byte, metadata.GetShardSum())
-	for i, part := range metadata.Parts {
-		fmt.Printf("part: %v\n", part)
-		shards[i], err = os.ReadFile(part)
-		if err != nil {
-			log.Printf("malformed shard: %s.%d\n", metadata.Checksum, i)
-			shards[i] = nil
-		}
-	}
+	// shards := make([][]byte, metadata.GetShardSum())
+	// for i, part := range metadata.Parts {
+	// 	fmt.Printf("part: %v\n", part)
+	// 	shards[i], err = os.ReadFile(part)
+	// 	if err != nil {
+	// 		log.Printf("malformed shard: %s.%d\n", metadata.Checksum, i)
+	// 		shards[i] = nil
+	// 	}
+	// }
 
 	// verify
 	ok, _ := enc.Verify(shards)
@@ -117,8 +117,13 @@ func (ErasureCodec) Decode(metadata *storage.Metadata) (outfile string, err erro
 			log.Println("reconstruction success!!!", metadata.Checksum)
 		}
 	}
-
-	outfile = fmt.Sprintf("%s/%s/%s", utils.StoragePath, metadata.Checksum, metadata.Name)
+	outputDir := fmt.Sprintf("%s/%s", utils.StoragePath, metadata.Checksum)
+	err = os.MkdirAll(outputDir, os.ModePerm)
+	if err != nil {
+		log.Println("Failed to create output directory:", err)
+		return "", err
+	}
+	outfile = fmt.Sprintf("%s/%s", outputDir, metadata.Name)
 	f, err := os.Create(outfile)
 	if err != nil {
 		return

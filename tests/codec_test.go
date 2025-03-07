@@ -29,8 +29,8 @@ func TestCodec(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-
-	outfile, err := ec.Decode(metadata)
+	shards := make([][]byte, metadata.GetShardSum())
+	outfile, err := ec.Decode(metadata, shards)
 	if err != nil {
 		panic(err)
 	}
