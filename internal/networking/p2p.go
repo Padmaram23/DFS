@@ -143,6 +143,11 @@ func (n *Network) ShareMetaData(meta *storage.Metadata) (err error) {
 		return
 	}
 
+	filepath := fmt.Sprintf(internalUtils.BackupPath, n.GetHost().ID().String())
+	if err := n.fileStore.SaveToFile(filepath); err != nil {
+		log.Println("Error saving file store: %v", err)
+		return err
+	}
 	// err = n.AnnounceFile(meta.Checksum)
 	// if err != nil {
 	// 	return
@@ -411,6 +416,11 @@ func streamHandler(net *Network, fileStore *storage.FileStore) network.StreamHan
 
 			err = net.ShareFile(data["key"], filePath)
 			log.Printf("File received and saved as %s\n", data["key"])
+			filepath := fmt.Sprintf(internalUtils.BackupPath, net.GetHost().ID().String())
+			if err := net.fileStore.SaveToFile(filepath); err != nil {
+				log.Println("Error saving file store: %v", err)
+				return
+			}
 
 		default:
 			cid := command
